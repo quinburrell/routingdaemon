@@ -1,6 +1,5 @@
 #TODO
-#read config function
-#open connection function
+
 def hello(port):
     """constructs a hello packet and sends it to port"""
 def readconfig(filename):

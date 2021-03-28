@@ -1,4 +1,4 @@
-from configparser import ConfigParser
+from ConfigParser import ConfigParser
 import re
 import sys
 import time
@@ -81,6 +81,20 @@ def read_config(file):
 
     print(router_dict)
     return router_dict
+
+
+def construct_rip_entry(entry):
+    """constructs a properly formatted list for a given rip entry"""
+    entry_list = []
+    return entry_list
+
+
+def construct_rip_packet(req=1, rip_entries=[]):
+    """taking a list of the entries in an rip table, builds a byte array to send as a packet"""
+    packet_list = [req, 2, 0, 0]    # req specifies if request/response packet, plus mandatory version and 0 fields
+    for entry in rip_entries:
+        packet_list += [construct_rip_entry(entry)]
+    return bytearray(packet_list)
 
 
 def init_sockets(inputs):
