@@ -34,7 +34,7 @@ def read_config(file):
     router_dict = {}
 
     # Router ID
-    router_num = int((config['router']['router_id']))  # Extracts router id from config file
+    router_num = int(config['router']['router_id'])  # Extracts router id from config file
     if 1 <= router_num <= 64000:  # Checks id is a valid id
         router_dict['router-id'] = router_num  # If valid then gets added to the router dictionary
     else:
@@ -93,20 +93,20 @@ def construct_rip_packet(req=1, rip_entries=[]):
     """taking a list of the entries in an rip table, builds a byte array to send as a packet"""
     packet_list = [req, 2, 0, 0]    # req specifies if request/response packet, plus mandatory version and 0 fields
     for entry in rip_entries:
-        packet_list += [construct_rip_entry(entry)]
-    return bytearray(packet_list)
+        packet_list += construct_rip_entry(entry)
+    return bytearray(packet_list)  # returns the entire packet as a bytearray
 
 
 def init_sockets(inputs):
-    sockets = []
+    sockets = []  # a list of the sockets available
     try:
         for i in range(len(inputs)):
-            sockets += [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]
+            sockets += [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]  # opens a sockets for each supplied input
         for i, sock in enumerate(sockets):
             sock.bind(('localhost', inputs[i]))
             print("socket on port", inputs[i], "initialised")
     except socket.error:
-        sys.exit(error_msg(4))
+        sys.exit(error_msg(4))  # Error. Socket could not be bound.
     return sockets
 
 
@@ -116,6 +116,7 @@ def mainloop():
     router_dict = read_config(filename)
     sockets = init_sockets(router_dict['input-ports'])
     while 1:
+        # an infinite while loop starts as the router waits for packets
         readable, _, _ = select.select(sockets, [], [])
         for sock in readable:
             data, sender_addr = sock.recvfrom(1024)
