@@ -19,15 +19,15 @@ hello packet protocols
 
 class RipEntry:
     """An object that represents all the information about the router for an RIP Entry"""
-    def __init__(self, router_id, inputs, outputs, timer_start):
+    def __init__(self, router_id, inputs, outputs, timer_start, metric):
         self.router_id = router_id
         self.inputs = inputs
         self.outputs = outputs
         self.timer_start = timer_start
+        self.metric = metric
 
     def build_packet(self):
-        packet = ([0] * 7) + [self.router_id] + ([0] * 11) + [1]
-        return bytearray(packet)
+        return ([0] * 7) + [self.router_id] + ([0] * 11) + [1]
 
 
 def error_msg(error_code):
@@ -37,7 +37,10 @@ def error_msg(error_code):
         1: "Your input ports do not match your output ports. Please update your configuration file",
         2: "Please make sure you do not have the same entry in your input and output port fields",
         3: "Please make sure your port numbers are between 1024 and 64000",
-        4: "Failed to initialise sockets"
+        4: "Failed to initialise sockets",
+        10: "Packet contains less than one RIP Entry",
+        11: "RIP Packet header incorrect",
+        12: "Packet contains fragments"
     }
     return error_text[error_code]
 
@@ -86,14 +89,14 @@ def read_config(file):
             sys.exit(error_msg(3))  # Error
 
     start = time.time()
-    return RipEntry(router_num, input_ports, output_ports, start)
+    return RipEntry(router_num, input_ports, output_ports, start, 0)
 
 
 def rip_packet(rip_entries):
     """taking a list of the entries in an rip table, builds a byte array to send as a packet"""
-    packet = b'\2\2\0\0'    # The RIP header
+    packet = bytearray([2, 2, 0, 0])    # The RIP header
     for entry in rip_entries:
-        packet += entry.build_packet  # a bytearray representing each RIP Entry
+        packet += bytearray(entry.build_packet())  # a bytearray representing each RIP Entry
     return packet  # returns the entire packet as a bytearray
 
 
@@ -126,7 +129,9 @@ def format_check(rec_packet):
 def update_table(rec_packet, routing_table, i=3):
     """updates routing table to be in accordance with the received packet"""
     while i < len(rec_packet):
-        new = RipEntry
+        new = RipEntry(rec_packet[i+8], [], [], 0, rec_packet[i+20]+1)
+        routing_table += [new]
+        i += 20
     return routing_table
 
 
@@ -136,9 +141,11 @@ def mainloop():
     routing_table = [read_config(filename)]  # A list of RipEntry obj, one for each router that this router is aware of
     sockets = init_sockets(routing_table[0].inputs)  # A list of sockets that this router is neighbouring
     # The router informs its neighbours of its own existence
-    for sock in sockets:
-        sock.sendto(rip_packet(routing_table))
+    for i, sock in enumerate(sockets):
+        sock.sendto(rip_packet(routing_table), ('localhost', routing_table[0].inputs[i]))
     while 1:
+        for entry in routing_table:
+            print(entry.build_packet())
         # The router then waits for updates
         readable, _, _ = select.select(sockets, [], [])
         for read in readable:
