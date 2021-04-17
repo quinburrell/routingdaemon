@@ -13,21 +13,23 @@ Purpose: Parses router.ini files and does basic error checks
 TODO:
 build_packet method
 update routing table func
-hello packet protocols
+read_config function builds table entries with all given info
+
 """
 
 
 class RipEntry:
     """An object that represents all the information about the router for an RIP Entry"""
-    def __init__(self, router_id, inputs, outputs, timer_start, metric):
-        self.router_id = router_id
-        self.inputs = inputs
-        self.outputs = outputs
-        self.timer_start = timer_start
+    def __init__(self, router_id, timer_start, inputs, outputs, routing, metric=0):
+        self.router_id = router_id  # int
+        self.timer_start = timer_start  # time value
+        self.inputs = inputs  # list of router's input ports
+        self.outputs = outputs  # list of router's output ports
+        self.routing = routing  # dict of format {router num: [metric, next hop]}
         self.metric = metric
 
     def build_packet(self):
-        return ([0] * 7) + [self.router_id] + ([0] * 11) + [1]
+        return ([0] * 7) + [self.router_id] + ([0] * 11) + [self.metric]
 
 
 def error_msg(error_code):
@@ -73,6 +75,7 @@ def read_config(file):
     # Outputs
     out = config['router']['outputs'].split(', ')  # Extracts outputs from the config file
     output_ports = []
+    routing_table = {1: [16, 0], 2: [16, 0], 3: [16, 0], 4: [16, 0], 5: [16, 0], 6: [16, 0], 7: [16, 0]}
 
     for entry in out:
         re_result = re.search("(.*)-(.)-(.)", entry).groups()  # Uses a regex to split the values of the entry
@@ -80,7 +83,9 @@ def read_config(file):
         if 1024 <= output_port <= 64000:  # Checks port number is valid
             if output_port not in input_ports:  # Checks this port number is not also an input port
                 if router_id in neighbours:  # Checks that the output port has a matching input port for that router
-                    output_ports.append([output_port, metric, router_id])
+                    output_ports.append(output_port)
+                    routing_update = [metric, router_id]
+                    routing_table[router_id] = routing_update
                 else:
                     sys.exit(error_msg(1))  # Error
             else:
@@ -89,7 +94,8 @@ def read_config(file):
             sys.exit(error_msg(3))  # Error
 
     start = time.time()
-    return RipEntry(router_num, input_ports, output_ports, start, 0)
+    routing_table[router_num] = [0, router_num]
+    return RipEntry(router_num, start, input_ports, output_ports, routing_table)
 
 
 def rip_packet(rip_entries):
@@ -107,14 +113,14 @@ def init_sockets(inputs):
             sockets += [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]  # opens a sockets for each supplied input
         for i, sock in enumerate(sockets):
             sock.bind(('localhost', inputs[i]))
-            print("socket on port", inputs[i], "initialised")
+            print("socket on port " + str(inputs[i]) + " initialised")
     except socket.error:
         sys.exit(error_msg(4))  # Error. Socket could not be bound.
     return sockets
 
 
 def format_check(rec_packet):
-    """Returns True if the received packet is formated correctly, otherwise provides an error message and False"""
+    """Returns True if the received packet is formatted correctly, otherwise provides an error message and False"""
     if len(rec_packet) < 4:  # packet contains at least one RIP entry
         error_msg(10)
     elif rec_packet[0:5] != b'\2\2\0\0':  # Packet header is correct
@@ -140,24 +146,30 @@ def mainloop():
     filename = sys.argv[1]  # Holds the variable given in the command line
     routing_table = [read_config(filename)]  # A list of RipEntry obj, one for each router that this router is aware of
     sockets = init_sockets(routing_table[0].inputs)  # A list of sockets that this router is neighbouring
+
     # The router informs its neighbours of its own existence
     for i, sock in enumerate(sockets):
-        sock.sendto(rip_packet(routing_table), ('localhost', routing_table[0].inputs[i]))
+        sock.sendto(rip_packet(routing_table), ('localhost', routing_table[0].outputs[i]))
+
     while 1:
         for entry in routing_table:
             print(entry.build_packet())
         # The router then waits for updates
-        readable, _, _ = select.select(sockets, [], [])
-        for read in readable:
-            data, sender_addr = read.recvfrom(1024)
-            print("packet received from", sender_addr)
-            # Router checks the new packet format and if it is different from current routing table
-            if format_check(data):
-                if routing_table.build_packet() != data:
-                    # Router updates its routing table and informs its neighbours of the change
-                    routing_table = update_table(data, routing_table)
-                    for sock in sockets:
-                        sock.sendto(rip_packet(routing_table))
+        try:
+            readable, _, _ = select.select(sockets, [], [], 10)
+            for read in readable:  # For each socket within the list of sockets
+                data, sender_addr = read.recvfrom(1024)
+                print("packet received from", sender_addr)
+                print(data)
+                # Router checks the new packet format and if it is different from current routing table
+                if format_check(data):
+                    if routing_table.build_packet() != data:
+                        # Router updates its routing table and informs its neighbours of the change
+                        routing_table = update_table(data, routing_table)
+                        for sock in sockets:
+                            sock.sendto(rip_packet(routing_table))
+        except socket.error():
+            print("Timeout")
 
 
 mainloop()
