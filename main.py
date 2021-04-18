@@ -21,7 +21,7 @@ read_config function builds table entries with all given info
 class RipEntry:
     """An object that represents all the information about the router for an RIP Entry"""
     def __init__(self, router_id, metric, next_hop, timer):
-        self.router_id = router_id  # int
+        self.router_id = router_id
         self.metric = metric
         self.next_hop = next_hop
         self.timer = timer
@@ -73,7 +73,8 @@ def read_config(file):
     # Outputs
     out = config['router']['outputs'].split(', ')  # Extracts outputs from the config file
     output_ports = []
-    rip_entries = []
+    rip_entries = []  # A list of RipEntry obj, one for each router that this router is aware of
+    rip_entries.append(RipEntry(router_num, 0, router_num, time.time()))
 
     for entry in out:
         re_result = re.search("(.*)-(.)-(.)", entry).groups()  # Uses a regex to split the values of the entry
@@ -82,9 +83,7 @@ def read_config(file):
             if output_port not in input_ports:  # Checks this port number is not also an input port
                 if router_id in neighbours:  # Checks that the output port has a matching input port for that router
                     output_ports.append(output_port)
-                    start_time = time.time()
-                    rip_entries.append(RipEntry(router_id, metric, router_id, start_time))
-                    print(rip_entries)
+                    rip_entries.append(RipEntry(router_id, metric, router_id, time.time()))
                 else:
                     sys.exit(error_msg(1))  # Error
             else:
@@ -92,15 +91,17 @@ def read_config(file):
         else:
             sys.exit(error_msg(3))  # Error
 
-    return input_ports, output_ports, rip_entries
+    sockets = init_sockets(input_ports)  # A list of sockets that this router is neighbouring
+    return sockets, output_ports, rip_entries
 
 
 def rip_packet(rip_entries):
     """taking a list of the entries in an rip table, builds a byte array to send as a packet"""
-    packet = bytearray([2, 2, 0, 0])    # The RIP header
+    packet = [2, 2, 0, 0]  # The RIP header
     for entry in rip_entries:
-        packet += bytearray(entry.build_packet())  # a bytearray representing each RIP Entry
-    return packet  # returns the entire packet as a bytearray
+        packet += entry.build_packet()  # a bytearray representing each RIP Entry
+    byte_packet = bytearray(packet)
+    return byte_packet  # returns the entire packet as a bytearray
 
 
 def init_sockets(inputs):
@@ -141,8 +142,7 @@ def update_table(rec_packet, routing_table, i=3):
 def mainloop():
     """mainloop of the program"""
     filename = sys.argv[1]  # Holds the variable given in the command line
-    inputs, outputs, routing_table = read_config(filename)  # A list of RipEntry obj, one for each router that this router is aware of
-    sockets = init_sockets(inputs)  # A list of sockets that this router is neighbouring
+    sockets, outputs, routing_table = read_config(filename)  # Produces these variable from the given file
 
     # The router informs its neighbours of its own existence
     for i, sock in enumerate(sockets):
@@ -155,8 +155,8 @@ def mainloop():
         try:
             readable, _, _ = select.select(sockets, [], [], 10)
             for read in readable:  # For each socket within the list of sockets
-                data, sender_addr = read.recvfrom(1024)
-                print("packet received from", sender_addr)
+                (data, sender_addr) = read.recvfrom(1024)
+                print("packet received from " + str(sender_addr))
                 # Router checks the new packet format and if it is different from current routing table
                 if format_check(data):
                     if routing_table.build_packet() != data:
