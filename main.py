@@ -143,10 +143,11 @@ def mainloop():
     """mainloop of the program"""
     filename = sys.argv[1]  # Holds the variable given in the command line
     sockets, outputs, routing_table = read_config(filename)  # Produces these variable from the given file
-
+    output_socks = []
     # The router informs its neighbours of its own existence
-    for i, sock in enumerate(sockets):
-        sock.sendto(rip_packet(routing_table), ('localhost', outputs[i]))
+    for i, output in enumerate(outputs):
+        output_socks += [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]
+        output_socks[i].sendto(rip_packet(routing_table), ('localhost', output))
 
     while 1:
         for entry in routing_table:
@@ -155,15 +156,17 @@ def mainloop():
         try:
             readable, _, _ = select.select(sockets, [], [], 10)
             for read in readable:  # For each socket within the list of sockets
-                (data, sender_addr) = read.recvfrom(1024)
+                data, sender_addr = read.recvfrom(1024)
                 print("packet received from " + str(sender_addr))
+
                 # Router checks the new packet format and if it is different from current routing table
                 if format_check(data):
                     if routing_table.build_packet() != data:
                         # Router updates its routing table and informs its neighbours of the change
                         routing_table = update_table(data, routing_table)
-                        for sock in sockets:
-                            sock.sendto(rip_packet(routing_table))
+                        for i, sock in enumerate(output_socks):
+                            sock.sendto(rip_packet(routing_table), ('localhost', outputs[i]))
+
         except socket.error():
             print("Timeout")
 
