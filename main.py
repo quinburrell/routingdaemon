@@ -158,7 +158,7 @@ def mainloop():
             for read in readable:  # For each socket within the list of sockets
                 data, sender_addr = read.recvfrom(1024)
                 print("packet received from " + str(sender_addr))
-
+                print(data)
                 # Router checks the new packet format and if it is different from current routing table
                 if format_check(data):
                     if routing_table.build_packet() != data:
