@@ -9,17 +9,16 @@ import socket
 Authors: Quin Burrell and Alex McCarty
 Date:    21 March 2021
 Purpose: Parses router.ini files and does basic error checks
-
 TODO:
 build_packet method
 update routing table func
 read_config function builds table entries with all given info
-
 """
 
 
 class RipEntry:
     """An object that represents all the information about the router for an RIP Entry"""
+
     def __init__(self, router_id, metric, next_hop, timer):
         self.router_id = router_id
         self.metric = metric
@@ -65,7 +64,8 @@ def read_config(file):
         entry = int(entry)
         if 1024 < entry < 64000:  # Checks input port is valid
             input_ports.append(entry)  # If valid, appends to list fo input ports
-            neighbours.append(int((entry - (router_num * 1000))/100))  # Finds the router id of the neighbouring router
+            neighbours.append(
+                int((entry - (router_num * 1000)) / 100))  # Finds the router id of the neighbouring router
         else:
 
             sys.exit(error_msg(0))  # Error
@@ -120,22 +120,50 @@ def init_sockets(inputs):
 def format_check(rec_packet):
     """Returns True if the received packet is formatted correctly, otherwise provides an error message and False"""
     if len(rec_packet) < 4:  # packet contains at least one RIP entry
-        error_msg(10)
-    elif rec_packet[0:5] != b'\2\2\0\0':  # Packet header is correct
-        error_msg(11)
-    elif (len(rec_packet)-4) % 20 != 0:
-        error_msg(12)
+        print(error_msg(10))
+    elif rec_packet[0:4] != b'\2\2\0\0':  # Packet header is correct
+        print(error_msg(11))
+    elif (len(rec_packet) - 4) % 20 != 0:
+        print(error_msg(12))
     else:
         return True
     return False
 
 
-def update_table(rec_packet, routing_table, i=3):
+def update_table(rec_packet, routing_table):
     """updates routing table to be in accordance with the received packet"""
-    while i < len(rec_packet):
-        new = RipEntry(rec_packet[i+8], [], [], 0, rec_packet[i+20]+1)
-        routing_table += [new]
+    message = []
+    i = 4
+    length = len(rec_packet)
+    while i < length:
+        message.append(rec_packet[i])
+        i += 1
+
+    sender = rec_packet[11]
+    current_routers = []
+    for entry in routing_table:
+        if entry.router_id == sender:
+            metric_to_sender = entry.metric
+        current_routers.append(entry.router_id)
+
+    i = 0
+    while i < len(message):
+        end = i + 20
+        entry = message[i:end]
+        id = entry[7]
+        metric = entry[19] + metric_to_sender
+
+        if metric > 0:
+            if id in current_routers:
+                for entry in routing_table:
+                    if entry.router_id == id and entry.metric > metric:
+                        entry.metric = metric
+                        entry.next_hop = sender
+                        entry.time = time.time()
+            else:
+                routing_table.append(RipEntry(id, metric, sender, time.time()))
         i += 20
+
     return routing_table
 
 
@@ -157,12 +185,15 @@ def mainloop():
             readable, _, _ = select.select(sockets, [], [], 10)
             for read in readable:  # For each socket within the list of sockets
                 data, sender_addr = read.recvfrom(1024)
+                data = bytearray(data)
                 print("packet received from " + str(sender_addr))
-                print(data)
                 # Router checks the new packet format and if it is different from current routing table
                 if format_check(data):
-                    if routing_table.build_packet() != data:
-                        # Router updates its routing table and informs its neighbours of the change
+                    check = True
+                    for entry in routing_table:
+                        if entry.build_packet() == data:
+                            check = False
+                    if check:
                         routing_table = update_table(data, routing_table)
                         for i, sock in enumerate(output_socks):
                             sock.sendto(rip_packet(routing_table), ('localhost', outputs[i]))
