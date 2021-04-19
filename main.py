@@ -130,10 +130,9 @@ def format_check(rec_packet):
     return False
 
 
-def update_table(rec_packet, routing_table):
+def update_table(rec_packet, routing_table, i=4, count=0):
     """updates routing table to be in accordance with the received packet"""
     message = []
-    i = 4
     length = len(rec_packet)
     while i < length:
         message.append(rec_packet[i])
@@ -146,10 +145,9 @@ def update_table(rec_packet, routing_table):
             metric_to_sender = entry.metric
         current_routers.append(entry.router_id)
 
-    i = 0
-    while i < len(message):
-        end = i + 20
-        entry = message[i:end]
+    while count < len(message):
+        end = count + 20
+        entry = message[count:end]
         id = entry[7]
         metric = entry[19] + metric_to_sender
 
