@@ -12,7 +12,7 @@ Purpose: Parses router.ini files and does basic error checks
 TODO:
 split horizon poisoned reverse
 time outs
-error catching
+if one router closes then the other routers reroute
 """
 
 
@@ -25,7 +25,7 @@ class RipEntry:
         self.next_hop = next_hop
         self.timer = timer
 
-    def build_packet(self):
+    def build_packet(self):  # Packet format for sending messages
         return ([0] * 7) + [self.router_id] + ([0] * 11) + [self.metric]
 
 
@@ -35,12 +35,12 @@ def error_msg(error_code):
         0: "Please enter a value between 1 and 64000",
         1: "Your input ports do not match your output ports. Please update your configuration file",
         2: "Please make sure you do not have the same entry in your input and output port fields",
-        3: "Please make sure your port numbers are between 1024 and 64000",
-        4: "Failed to initialise sockets",
+        3: "Metrics must be between 0 and 16",
+        4: "Please make sure your port numbers are between 1024 and 64000",
+        5: "Failed to initialise sockets",
         10: "Packet contains less than one RIP Entry",
         11: "RIP Packet header incorrect",
-        12: "Packet contains fragments",
-        13: "Given metric is out of range"
+        12: "Packet contains fragments"
     }
     return error_text[error_code]
 
@@ -78,19 +78,22 @@ def read_config(file):
     rip_entries.append(RipEntry(router_num, 0, router_num, time.time()))
 
     for entry in out:
-        re_result = re.search("(.*)-(.)-(.)", entry).groups()  # Uses a regex to split the values of the entry
+        re_result = re.search("(.*)-(.*)-(.*)", entry).groups()  # Uses a regex to split the values of the entry
         output_port, metric, router_id = [int(i) for i in re_result]  # Changes all values to ints
         if 1024 <= output_port <= 64000:  # Checks port number is valid
-            if output_port not in input_ports:  # Checks this port number is not also an input port
-                if router_id in neighbours:  # Checks that the output port has a matching input port for that router
-                    output_ports.append(output_port)
-                    rip_entries.append(RipEntry(router_id, metric, router_id, time.time()))
+            if metric < 16:
+                if output_port not in input_ports:  # Checks this port number is not also an input port
+                    if router_id in neighbours:  # Checks that the output port has a matching input port for that router
+                        output_ports.append(output_port)
+                        rip_entries.append(RipEntry(router_id, metric, router_id, time.time()))
+                    else:
+                        sys.exit(error_msg(1))  # Error
                 else:
-                    sys.exit(error_msg(1))  # Error
+                    sys.exit(error_msg(2))  # Error
             else:
-                sys.exit(error_msg(2))  # Error
+                sys.exit(error_msg(3))  # Error
         else:
-            sys.exit(error_msg(3))  # Error
+            sys.exit(error_msg(4))  # Error
 
     sockets = init_sockets(input_ports)  # A list of sockets that this router is neighbouring
     return sockets, output_ports, rip_entries
@@ -114,7 +117,7 @@ def init_sockets(inputs):
             sock.bind(('localhost', inputs[i]))
             print("socket on port " + str(inputs[i]) + " initialised")
     except socket.error:
-        sys.exit(error_msg(4))  # Error. Socket could not be bound.
+        sys.exit(error_msg(5))  # Error
     return sockets
 
 
@@ -124,7 +127,7 @@ def format_check(rec_packet):
         print(error_msg(10))
     elif rec_packet[0:4] != b'\2\2\0\0':  # Packet header is correct
         print(error_msg(11))
-    elif (len(rec_packet) - 4) % 20 != 0:
+    elif (len(rec_packet) - 4) % 20 != 0:  # Packets contains messages of length 20
         print(error_msg(12))
     else:
         return True
@@ -133,12 +136,14 @@ def format_check(rec_packet):
 
 def update_table(rec_packet, routing_table, i=4, count=0):
     """updates routing table to be in accordance with the received packet"""
+    # Converts bytearray to a list of integers
     message = []
     length = len(rec_packet)
     while i < length:
         message.append(rec_packet[i])
         i += 1
 
+    # Gets the sender of the packet and the metric to the sending router
     sender = rec_packet[11]
     current_routers = []
     for entry in routing_table:
@@ -146,26 +151,41 @@ def update_table(rec_packet, routing_table, i=4, count=0):
             metric_to_sender = entry.metric
         current_routers.append(entry.router_id)
 
+    # Updates the routing table based on the sent routers and metrics
     while count < len(message):
         end = count + 20
         entry = message[count:end]
         id = entry[7]
-        if entry[19] > 16:
-            print(error_msg(13))
-        else:
-            metric = entry[19] + metric_to_sender
-            if metric > 0:
-                if id in current_routers:
-                    for entry in routing_table:
-                        if entry.router_id == id and entry.metric > metric:
-                            entry.metric = metric
-                            entry.next_hop = sender
-                            entry.time = time.time()
-                else:
-                    routing_table.append(RipEntry(id, metric, sender, time.time()))
-            count += 20
+        metric = entry[19] + metric_to_sender
+        if metric > 0:
+            if id in current_routers:
+                for entry in routing_table:
+                    if entry.router_id == id and entry.metric > metric:
+                        entry.metric = metric
+                        entry.next_hop = sender
+                        entry.time = time.time()
+            else:
+                routing_table.append(RipEntry(id, metric, sender, time.time()))
+        count += 20
 
     return routing_table
+
+
+def print_table(routing_table):
+    """ Prints each entry in the routing table in an ordered format """
+    print('Router {} routing table:'.format(routing_table[0].router_id))
+    order = []
+    for entry in routing_table:
+        order.append(entry.router_id)
+    order.sort()
+
+    i = 0
+    while i < len(order):
+        for entry in routing_table:
+            if entry.router_id == order[i]:
+                print("router id: {}, metric: {}, next_hop: {}, timer: {}"
+                      .format(entry.router_id, entry.metric, entry.next_hop, entry.timer))
+        i += 1
 
 
 def mainloop():
@@ -173,34 +193,37 @@ def mainloop():
     filename = sys.argv[1]  # Holds the variable given in the command line
     sockets, outputs, routing_table = read_config(filename)  # Produces these variable from the given file
     output_socks = []
+
     # The router informs its neighbours of its own existence
     for i, output in enumerate(outputs):
         output_socks += [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]
         output_socks[i].sendto(rip_packet(routing_table), ('localhost', output))
 
+    start = time.time()
+    print_table(routing_table)  # Print router's original routing table
+
     while 1:
-        for entry in routing_table:
-            print(entry.build_packet())
-        # The router then waits for updates
-        try:
+        try:  # The router waits updates
             readable, _, _ = select.select(sockets, [], [], 10)
             for read in readable:  # For each socket within the list of sockets
-                data, sender_addr = read.recvfrom(1024)
-                data = bytearray(data)
+                data, sender_addr = read.recvfrom(1024)  # Receives updates from connected sockets and splits into vars
+                data = bytearray(data)  # Converts data string into a bytearray
                 print("packet received from " + str(sender_addr))
-                # Router checks the new packet format and if it is different from current routing table
-                if format_check(data):
+                if format_check(data):  # Checks format of data bytearray
                     check = True
-                    for entry in routing_table:
+                    for entry in routing_table:  # Checks the packet is not equal to any existing routing table entries
                         if entry.build_packet() == data:
                             check = False
                     if check:
-                        routing_table = update_table(data, routing_table)
-                        for i, sock in enumerate(output_socks):
+                        routing_table = update_table(data, routing_table)  # Updates routing table with info from data
+                        for i, sock in enumerate(output_socks):  # Sends updates to each output socket
                             sock.sendto(rip_packet(routing_table), ('localhost', outputs[i]))
 
         except socket.error():
             print("Timeout")
+
+        print_table(routing_table)  # Print updated routing table
+        time.sleep(10.0 - ((time.time() - start) % 10.0))  # Repeats this every 10 seconds
 
 
 mainloop()
