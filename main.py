@@ -10,9 +10,9 @@ Authors: Quin Burrell and Alex McCarty
 Date:    21 March 2021
 Purpose: Parses router.ini files and does basic error checks
 TODO:
-build_packet method
-update routing table func
-read_config function builds table entries with all given info
+split horizon poisoned reverse
+time outs
+error catching
 """
 
 
@@ -39,7 +39,8 @@ def error_msg(error_code):
         4: "Failed to initialise sockets",
         10: "Packet contains less than one RIP Entry",
         11: "RIP Packet header incorrect",
-        12: "Packet contains fragments"
+        12: "Packet contains fragments",
+        13: "Given metric is out of range"
     }
     return error_text[error_code]
 
@@ -139,7 +140,6 @@ def update_table(rec_packet, routing_table, i=4, count=0):
         message.append(rec_packet[i])
         i += 1
 
-    print('why')
     sender = rec_packet[11]
     current_routers = []
     for entry in routing_table:
@@ -147,25 +147,24 @@ def update_table(rec_packet, routing_table, i=4, count=0):
             metric_to_sender = entry.metric
         current_routers.append(entry.router_id)
 
-    print('is this')
     while count < len(message):
         end = count + 20
         entry = message[count:end]
         id = entry[7]
-        metric = entry[19] + metric_to_sender
-
-        if metric > 0:
-            if id in current_routers:
-                for entry in routing_table:
-                    if entry.router_id == id and entry.metric > metric:
-                        entry.metric = metric
-                        entry.next_hop = sender
-                        entry.time = time.time()
-            else:
-                routing_table.append(RipEntry(id, metric, sender, time.time()))
-        count += 20
-
-    print('being frustrating')
+        if entry[19] > 16:
+            print(error_msg(13))
+        else:
+            metric = entry[19] + metric_to_sender
+            if metric > 0:
+                if id in current_routers:
+                    for entry in routing_table:
+                        if entry.router_id == id and entry.metric > metric:
+                            entry.metric = metric
+                            entry.next_hop = sender
+                            entry.time = time.time()
+                else:
+                    routing_table.append(RipEntry(id, metric, sender, time.time()))
+            count += 20
 
     return routing_table
 
