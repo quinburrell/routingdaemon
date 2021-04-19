@@ -132,12 +132,14 @@ def format_check(rec_packet):
 
 def update_table(rec_packet, routing_table, i=4, count=0):
     """updates routing table to be in accordance with the received packet"""
+    print('we got here!')
     message = []
     length = len(rec_packet)
     while i < length:
         message.append(rec_packet[i])
         i += 1
 
+    print('why')
     sender = rec_packet[11]
     current_routers = []
     for entry in routing_table:
@@ -145,6 +147,7 @@ def update_table(rec_packet, routing_table, i=4, count=0):
             metric_to_sender = entry.metric
         current_routers.append(entry.router_id)
 
+    print('is this')
     while count < len(message):
         end = count + 20
         entry = message[count:end]
@@ -160,7 +163,9 @@ def update_table(rec_packet, routing_table, i=4, count=0):
                         entry.time = time.time()
             else:
                 routing_table.append(RipEntry(id, metric, sender, time.time()))
-        i += 20
+        count += 20
+
+    print('being frustrating')
 
     return routing_table
 
