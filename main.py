@@ -133,7 +133,6 @@ def format_check(rec_packet):
 
 def update_table(rec_packet, routing_table, i=4, count=0):
     """updates routing table to be in accordance with the received packet"""
-    print('we got here!')
     message = []
     length = len(rec_packet)
     while i < length:
