@@ -40,7 +40,8 @@ def error_msg(error_code):
         10: "Packet contains less than one RIP Entry",
         11: "RIP Packet header incorrect",
         12: "Packet contains fragments",
-        13: "Given metric is out of range"
+        13: "Given metric is out of range",
+        20: "An error on the socket"
     }
     return error_text[error_code]
 
@@ -131,7 +132,7 @@ def format_check(rec_packet):
     return False
 
 
-def update_table(rec_packet, routing_table, i=4, count=0):
+def update_table(rec_packet, routing_table, i=4, count=0, update=False):
     """updates routing table to be in accordance with the received packet"""
     message = []
     length = len(rec_packet)
@@ -161,11 +162,19 @@ def update_table(rec_packet, routing_table, i=4, count=0):
                             entry.metric = metric
                             entry.next_hop = sender
                             entry.time = time.time()
+                            update = True
                 else:
                     routing_table.append(RipEntry(id, metric, sender, time.time()))
+                    update = True
             count += 20
 
-    return routing_table
+    return update, routing_table
+
+
+def print_routing_table(routing_table):
+    """prints the current state of the routing table"""
+    for entry in routing_table:
+            print(entry.build_packet())
 
 
 def mainloop():
@@ -178,29 +187,31 @@ def mainloop():
         output_socks += [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]
         output_socks[i].sendto(rip_packet(routing_table), ('localhost', output))
 
+    print_routing_table(routing_table)
     while 1:
-        for entry in routing_table:
-            print(entry.build_packet())
         # The router then waits for updates
         try:
             readable, _, _ = select.select(sockets, [], [], 10)
+            if not readable:
+                # select has timed out, a periodic update occurs
+                print("timeout")
+                for i, sock in enumerate(output_socks):
+                    print("sending to", outputs[i])
+                    sock.sendto(rip_packet(routing_table), ('localhost', outputs[i]))
             for read in readable:  # For each socket within the list of sockets
                 data, sender_addr = read.recvfrom(1024)
                 data = bytearray(data)
-                print("packet received from " + str(sender_addr))
+                print("packet received from router", data[11], str(sender_addr))
                 # Router checks the new packet format and if it is different from current routing table
                 if format_check(data):
-                    check = True
-                    for entry in routing_table:
-                        if entry.build_packet() == data:
-                            check = False
-                    if check:
-                        routing_table = update_table(data, routing_table)
+                    update, routing_table = update_table(data, routing_table)
+                    if update:
+                        print_routing_table(routing_table)
                         for i, sock in enumerate(output_socks):
                             sock.sendto(rip_packet(routing_table), ('localhost', outputs[i]))
 
         except socket.error():
-            print("Timeout")
+            error_msg(20)
 
 
 mainloop()
