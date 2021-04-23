@@ -151,30 +151,37 @@ def update_table(rec_packet, routing_table, i=4, count=0, update=False):
         end = count + 20
         entry = message[count:end]
         id = entry[7]
-        if entry[19] > 16:
-            print(error_msg(13))
-        else:
-            metric = entry[19] + metric_to_sender
-            if metric > 0:
-                if id in current_routers:
-                    for entry in routing_table:
-                        if entry.router_id == id and entry.metric > metric:
-                            entry.metric = metric
-                            entry.next_hop = sender
-                            entry.time = time.time()
-                            update = True
-                else:
-                    routing_table.append(RipEntry(id, metric, sender, time.time()))
-                    update = True
-            count += 20
+        metric = entry[19]
+        if metric < 16:
+            metric += metric_to_sender
+        if metric > 0:
+            if id in current_routers:
+                for entry in routing_table:
+                    if entry.router_id == id and entry.metric > metric:
+                        entry.metric = metric
+                        entry.next_hop = sender
+                        entry.time = time.time()
+                        update = True
+            else:
+                routing_table.append(RipEntry(id, metric, sender, time.time()))
+                update = True
+        count += 20
 
     return update, routing_table
+
+
+def timeout_check(routing_table):
+    """Checks the routing table for timeouts and if one is found, metric to that router is set to inf"""
+    for entry in routing_table:
+        if entry.timer < time.time() - 20:
+            entry.metric = 16
+    return routing_table
 
 
 def print_routing_table(routing_table):
     """prints the current state of the routing table"""
     for entry in routing_table:
-            print(entry.build_packet())
+        print(entry.build_packet())
 
 
 def mainloop():
@@ -189,15 +196,17 @@ def mainloop():
 
     print_routing_table(routing_table)
     while 1:
-        # The router then waits for updates
         try:
-            readable, _, _ = select.select(sockets, [], [], 10)
-            if not readable:
-                # select has timed out, a periodic update occurs
+            if routing_table[0].timer < time.time() - 10:  # router checks its own timer for timeout
+                routing_table[0].timer = time.time()
                 print("timeout")
                 for i, sock in enumerate(output_socks):
-                    print("sending to", outputs[i])
                     sock.sendto(rip_packet(routing_table), ('localhost', outputs[i]))
+
+            #routing_table = timeout_check(routing_table)
+
+            # The router then waits for updates
+            readable, _, _ = select.select(sockets, [], [], 10)
             for read in readable:  # For each socket within the list of sockets
                 data, sender_addr = read.recvfrom(1024)
                 data = bytearray(data)
