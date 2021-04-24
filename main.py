@@ -7,18 +7,13 @@ import socket
 
 """
 Authors: Quin Burrell and Alex McCarty
-Date:    21 March 2021
-Purpose: Parses router.ini files and does basic error checks
-TODO:
-split horizon poisoned reverse
-time outs
-error catching
+Date:  21 March 2021
+Purpose: Perform RIP routing between multiple routers
 """
 
 
 class RipEntry:
     """An object that represents all the information about the router for an RIP Entry"""
-
     def __init__(self, router_id, metric, next_hop, timer):
         self.router_id = router_id
         self.metric = metric
@@ -132,14 +127,8 @@ def format_check(rec_packet):
     return False
 
 
-def update_table(rec_packet, routing_table, i=4, count=0, update=False):
+def update_table(rec_packet, routing_table, count=4, update=False):
     """updates routing table to be in accordance with the received packet"""
-    message = []
-    length = len(rec_packet)
-    while i < length:
-        message.append(rec_packet[i])
-        i += 1
-
     sender = rec_packet[11]
     current_routers = []
     for entry in routing_table:
@@ -147,9 +136,9 @@ def update_table(rec_packet, routing_table, i=4, count=0, update=False):
             metric_to_sender = entry.metric
         current_routers.append(entry.router_id)
 
-    while count < len(message):
+    while count < len(rec_packet):
         end = count + 20
-        entry = message[count:end]
+        entry = rec_packet[count:end]
         id = entry[7]
         metric = entry[19]
         if metric < 16:
@@ -195,6 +184,7 @@ def mainloop():
         output_socks[i].sendto(rip_packet(routing_table), ('localhost', output))
 
     print_routing_table(routing_table)
+
     while 1:
         try:
             if routing_table[0].timer < time.time() - 10:  # router checks its own timer for timeout
@@ -210,17 +200,15 @@ def mainloop():
             for read in readable:  # For each socket within the list of sockets
                 data, sender_addr = read.recvfrom(1024)
                 data = bytearray(data)
-                print("packet received from router", data[11], str(sender_addr))
+                print("packet received from router " + str(data[11]), str(sender_addr))
                 # Router checks the new packet format and if it is different from current routing table
                 if format_check(data):
                     update, routing_table = update_table(data, routing_table)
                     if update:
                         print_routing_table(routing_table)
-                        for i, sock in enumerate(output_socks):
-                            sock.sendto(rip_packet(routing_table), ('localhost', outputs[i]))
 
         except socket.error():
-            error_msg(20)
+            print(error_msg(20))
 
 
 mainloop()
