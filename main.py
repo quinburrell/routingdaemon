@@ -85,7 +85,7 @@ def read_config(file):
             if output_port not in input_ports:  # Checks this port number is not also an input port
                 if router_id in neighbours:  # Checks that the output port has a matching input port for that router
                     output_ports.append((router_id, output_port))
-                    rip_entries.append(RipEntry(router_id, metric, router_id, time.time()))
+                    rip_entries.append(RipEntry(router_id, metric, 0, time.time()))
                 else:
                     sys.exit(error_msg(1))  # Error
             else:
@@ -141,8 +141,7 @@ def update_table(rec_packet, routing_table, index=24):
     sender = rec_packet[11]
     current_routers = []
     for entry in routing_table:
-        if entry.router_id != routing_table[0].router_id:
-            current_routers += [entry.router_id]
+        current_routers += [entry.router_id]
         if entry.router_id == sender:
             entry.timer = time.time()
             if entry.metric == 16:
@@ -152,7 +151,7 @@ def update_table(rec_packet, routing_table, index=24):
                         entry.timer = time.time()
                         break
                     index += 20
-                print('contact', entry.router_id, entry.metric)
+                print('contact made with previously unreachable router', entry.router_id)
             metric_to_sender = entry.metric
 
     index = 24
@@ -166,7 +165,8 @@ def update_table(rec_packet, routing_table, index=24):
                         entry.metric = 16
                         entry.timer = 0
                     else:
-                        entry.timer = time.time()
+                        if id != routing_table[0].router_id and entry.next_hop == sender:
+                            entry.timer = time.time()
                         if entry.metric > metric:
                             entry.metric = metric
                             entry.next_hop = sender
