@@ -194,7 +194,7 @@ def timeout_check(routing_table):
 def print_routing_table(routing_table):
     """prints the current state of the routing table"""
     for entry in routing_table:
-        print(entry.build_packet())
+        print('router: {}, metric: {}, next hop: {}'.format(entry.router_id, entry.metric, entry.next_hop))
 
 
 def mainloop():
@@ -206,6 +206,8 @@ def mainloop():
     for i, output in enumerate(outputs):
         output_socks += [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]
         output_socks[i].sendto(rip_packet(routing_table, output[0]), ('localhost', output[1]))
+
+    print_routing_table(routing_table)
 
     while 1:
         if routing_table[0].timer < time.time() - 10:  # router checks its own timer for timeout
