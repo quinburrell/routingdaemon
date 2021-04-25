@@ -129,7 +129,7 @@ def format_check(rec_packet):
         print(error_msg(10))
     elif rec_packet[0:4] != b'\2\2\0\0':  # Packet header is correct
         print(error_msg(11))
-    elif (len(rec_packet) - 4) % 20 != 0:
+    elif (len(rec_packet) - 4) % 20 != 0:  # Packet contains RIP entries of correct size
         print(error_msg(12))
     else:
         return True
@@ -140,6 +140,8 @@ def update_table(rec_packet, routing_table, index=24):
     """updates routing table to be in accordance with the received packet"""
     sender = rec_packet[11]
     current_routers = []
+    # First the router will go through its own routing table, reset the timer for the router it just received a packet
+    # from, and if that router had been unreachable it changes it so that it is now reachable
     for entry in routing_table:
         current_routers += [entry.router_id]
         if entry.router_id == sender:
@@ -154,6 +156,7 @@ def update_table(rec_packet, routing_table, index=24):
                 print('contact made with previously unreachable router', entry.router_id)
             metric_to_sender = entry.metric
 
+    # Next the router goes through the received packet and updates its routing table to agree with it.
     index = 24
     while index < len(rec_packet):
         id = rec_packet[index+7]
@@ -171,6 +174,7 @@ def update_table(rec_packet, routing_table, index=24):
                             entry.metric = metric
                             entry.next_hop = sender
         else:
+            # This entry is regarding a new router
             routing_table.append(RipEntry(id, metric, sender, time.time()))
         index += 20
 
@@ -206,6 +210,7 @@ def mainloop():
     while 1:
         if routing_table[0].timer < time.time() - 10:  # router checks its own timer for timeout
             routing_table[0].timer = time.time()
+            # If so the router prints out its current routing table and sends it to its neighbours
             print("Periodic Update")
             print_routing_table(routing_table)
             for i, sock in enumerate(output_socks):
