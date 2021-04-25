@@ -194,7 +194,8 @@ def timeout_check(routing_table):
 def print_routing_table(routing_table):
     """prints the current state of the routing table"""
     for entry in routing_table:
-        print('router: {}, metric: {}, next hop: {}, timer: {}'.format(entry.router_id, entry.metric, entry.next_hop, entry.timer))
+        print('router: {}, metric: {}, next hop: {}, timer: {}'
+              .format(entry.router_id, entry.metric, entry.next_hop, entry.timer))
 
 
 def mainloop():
