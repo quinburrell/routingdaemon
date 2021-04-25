@@ -7,13 +7,18 @@ import socket
 
 """
 Authors: Quin Burrell and Alex McCarty
-Date:  21 March 2021
-Purpose: Perform RIP routing between multiple routers
+Date:    21 March 2021
+Purpose: Parses router.ini files and does basic error checks
+TODO:
+split horizon poisoned reverse
+time outs
+error catching
 """
 
 
 class RipEntry:
     """An object that represents all the information about the router for an RIP Entry"""
+
     def __init__(self, router_id, metric, next_hop, timer):
         self.router_id = router_id
         self.metric = metric
@@ -79,7 +84,7 @@ def read_config(file):
         if 1024 <= output_port <= 64000:  # Checks port number is valid
             if output_port not in input_ports:  # Checks this port number is not also an input port
                 if router_id in neighbours:  # Checks that the output port has a matching input port for that router
-                    output_ports.append(output_port)
+                    output_ports.append((router_id, output_port))
                     rip_entries.append(RipEntry(router_id, metric, router_id, time.time()))
                 else:
                     sys.exit(error_msg(1))  # Error
@@ -92,17 +97,21 @@ def read_config(file):
     return sockets, output_ports, rip_entries
 
 
-def rip_packet(rip_entries):
+def rip_packet(rip_entries, receiver):
     """taking a list of the entries in an rip table, builds a byte array to send as a packet"""
     packet = [2, 2, 0, 0]  # The RIP header
     for entry in rip_entries:
+        real_metric = entry.metric
+        if entry.next_hop == receiver:
+            entry.metric = 16
         packet += entry.build_packet()  # a bytearray representing each RIP Entry
+        entry.metric = real_metric
     byte_packet = bytearray(packet)
     return byte_packet  # returns the entire packet as a bytearray
 
 
 def init_sockets(inputs):
-    sockets = []  # a list of the sockets available
+    sockets = []  # a list of the input sockets available
     try:
         for i in range(len(inputs)):
             sockets += [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]  # opens a sockets for each supplied input
@@ -127,43 +136,54 @@ def format_check(rec_packet):
     return False
 
 
-def update_table(rec_packet, routing_table, count=4, update=False):
+def update_table(rec_packet, routing_table, index=24):
     """updates routing table to be in accordance with the received packet"""
     sender = rec_packet[11]
     current_routers = []
     for entry in routing_table:
+        if entry.router_id != routing_table[0].router_id:
+            current_routers += [entry.router_id]
         if entry.router_id == sender:
+            entry.timer = time.time()
+            if entry.metric == 16:
+                while index < len(rec_packet):
+                    if rec_packet[index+7] == routing_table[0].router_id:
+                        entry.metric = rec_packet[index+19]
+                        entry.timer = time.time()
+                        break
+                    index += 20
+                print('contact', entry.router_id, entry.metric)
             metric_to_sender = entry.metric
-        current_routers.append(entry.router_id)
 
-    while count < len(rec_packet):
-        end = count + 20
-        entry = rec_packet[count:end]
-        id = entry[7]
-        metric = entry[19]
-        if metric < 16:
-            metric += metric_to_sender
-        if metric > 0:
-            if id in current_routers:
-                for entry in routing_table:
-                    if entry.router_id == id and entry.metric > metric:
-                        entry.metric = metric
-                        entry.next_hop = sender
-                        entry.time = time.time()
-                        update = True
-            else:
-                routing_table.append(RipEntry(id, metric, sender, time.time()))
-                update = True
-        count += 20
+    index = 24
+    while index < len(rec_packet):
+        id = rec_packet[index+7]
+        metric = rec_packet[index+19] + metric_to_sender
+        if id in current_routers:
+            for entry in routing_table:
+                if entry.router_id == id:
+                    if metric >= 16 and entry.next_hop == sender:
+                        entry.metric = 16
+                        entry.timer = 0
+                    else:
+                        entry.timer = time.time()
+                        if entry.metric > metric:
+                            entry.metric = metric
+                            entry.next_hop = sender
+        else:
+            routing_table.append(RipEntry(id, metric, sender, time.time()))
+        index += 20
 
-    return update, routing_table
+    return routing_table
 
 
 def timeout_check(routing_table):
-    """Checks the routing table for timeouts and if one is found, metric to that router is set to inf"""
+    """Checks the routing table for timeouts and if one is found, metric to that router is set to unreachable"""
     for entry in routing_table:
-        if entry.timer < time.time() - 20:
+        if entry.timer != 0 and entry.timer < time.time() - 30:
+            print("timeout on router", entry.router_id)
             entry.metric = 16
+            entry.timer = 0
     return routing_table
 
 
@@ -181,34 +201,31 @@ def mainloop():
     # The router informs its neighbours of its own existence
     for i, output in enumerate(outputs):
         output_socks += [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]
-        output_socks[i].sendto(rip_packet(routing_table), ('localhost', output))
-
-    print_routing_table(routing_table)
+        output_socks[i].sendto(rip_packet(routing_table, output[0]), ('localhost', output[1]))
 
     while 1:
+        if routing_table[0].timer < time.time() - 10:  # router checks its own timer for timeout
+            routing_table[0].timer = time.time()
+            print("Periodic Update")
+            print_routing_table(routing_table)
+            for i, sock in enumerate(output_socks):
+                sock.sendto(rip_packet(routing_table, outputs[i][0]), ('localhost', outputs[i][1]))
+
+        routing_table = timeout_check(routing_table)
         try:
-            if routing_table[0].timer < time.time() - 10:  # router checks its own timer for timeout
-                routing_table[0].timer = time.time()
-                print("timeout")
-                for i, sock in enumerate(output_socks):
-                    sock.sendto(rip_packet(routing_table), ('localhost', outputs[i]))
-
-            #routing_table = timeout_check(routing_table)
-
             # The router then waits for updates
-            readable, _, _ = select.select(sockets, [], [], 10)
+            readable, _, _ = select.select(sockets, [], [], 1)
             for read in readable:  # For each socket within the list of sockets
                 data, sender_addr = read.recvfrom(1024)
                 data = bytearray(data)
-                print("packet received from router " + str(data[11]), str(sender_addr))
+
                 # Router checks the new packet format and if it is different from current routing table
                 if format_check(data):
-                    update, routing_table = update_table(data, routing_table)
-                    if update:
-                        print_routing_table(routing_table)
+                    print("packet received from router", data[11], str(sender_addr))
+                    routing_table = update_table(data, routing_table)
 
         except socket.error():
-            print(error_msg(20))
+            error_msg(20)
 
 
 mainloop()
