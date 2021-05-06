@@ -8,11 +8,9 @@ import socket
 """
 Authors: Quin Burrell and Alex McCarty
 Date:    21 March 2021
-Purpose: Parses router.ini files and does basic error checks
-TODO:
-split horizon poisoned reverse
-time outs
-error catching
+Purpose: Takes a configuration file as an argument in the commandline and sets up a virtual router using the information
+ there. The program then emulates the RIP routing daemon with split horizon communicating with other virtual routers 
+ running concurrently in the same machine.
 """
 
 
@@ -151,6 +149,7 @@ def update_table(rec_packet, routing_table, index=24):
                     if rec_packet[index+7] == routing_table[0].router_id:
                         entry.metric = rec_packet[index+19]
                         entry.timer = time.time()
+                        entry.next_hop = 0
                         break
                     index += 20
                 print('contact made with previously unreachable router', entry.router_id)
